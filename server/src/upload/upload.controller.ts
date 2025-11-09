@@ -10,11 +10,15 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadService } from './upload.service';
 import { FileUploadResult } from './interfaces/upload-file.interface';
+import { ParserService } from '../parser/parser.service';
 import { memoryStorage } from 'multer';
 
 @Controller('upload')
 export class UploadController {
-  constructor(private readonly uploadService: UploadService) {}
+  constructor(
+    private readonly uploadService: UploadService,
+    private readonly parserService: ParserService,
+  ) {}
 
   @Post('file')
   @HttpCode(HttpStatus.OK)
@@ -54,7 +58,17 @@ export class UploadController {
       throw new BadRequestException('File is required');
     }
 
-    return this.uploadService.saveFile(file);
+    const result = await this.uploadService.saveFile(file);
+
+    // Парсим файл
+    try {
+      const fileContent = file.buffer.toString('utf-8');
+      await this.parserService.parse('file', fileContent);
+    } catch (error) {
+      // Ошибка парсинга не прерывает загрузку файла
+    }
+
+    return result;
   }
 }
 
