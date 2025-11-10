@@ -6,6 +6,7 @@ import { ParserModule } from './modules/parser/parser.module';
 import { CoreModule } from './core/core.module';
 import { FilesModule } from './modules/db/files/files.module';
 import { TextChunksModule } from './modules/db/text-chunks/text-chunks.module';
+import { EmbeddingsModule } from './modules/ai/embeddings.module';
 
 
 @Module({
@@ -27,7 +28,8 @@ import { TextChunksModule } from './modules/db/text-chunks/text-chunks.module';
 	ParserModule,
 	CoreModule,
 	FilesModule,
-	TextChunksModule
+	TextChunksModule,
+	EmbeddingsModule
   ],
   controllers: [],
   providers: [],
