@@ -12,12 +12,16 @@ import { UploadService } from './upload.service';
 import { FileUploadResult } from './interfaces/upload-file.interface';
 import { ParserService } from '../parser/parser.service';
 import { memoryStorage } from 'multer';
+import { FilesService } from '../db/files/files.service';
+import { TextChunksService } from '../db/text-chunks/text-chunks.service';
 
 @Controller('upload')
 export class UploadController {
   constructor(
     private readonly uploadService: UploadService,
     private readonly parserService: ParserService,
+    private readonly textChunksService: TextChunksService,
+    private readonly filesService: FilesService
   ) {}
 
   @Post('file')
@@ -62,14 +66,25 @@ export class UploadController {
 
     // Парсим файл
     try {
+      const fileEntity = await this.filesService.create(file.originalname);
+      
       const fileContent = file.buffer.toString('utf-8');
-      await this.parserService.parse('file', fileContent);
+      const parseResult = await this.parserService.parse('file', fileContent);
+      if (parseResult.chunks && parseResult.chunks.length > 0) {
+        await this.textChunksService.insertMany(parseResult.chunks.map((chunk) => ({
+          file_id: fileEntity.id,
+          chunk_index: chunk.index,
+          text: chunk.content,
+        })));
+      }
     } catch (error) {
       // Ошибка парсинга не прерывает загрузку файла
     }
 
     return result;
   }
+
+
 }
 
 
