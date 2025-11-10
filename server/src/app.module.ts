@@ -1,11 +1,34 @@
 import { Module } from '@nestjs/common';
-import { UploadModule } from './upload/upload.module';
-import { DataSourceModule } from './data-sources/data-source.module';
-import { ParserModule } from './parser/parser.module';
+import { ConfigModule } from '@nestjs/config';
+import { UploadModule } from './modules/upload/upload.module';
+import { DataSourceModule } from './modules/data-sources/data-source.module';
+import { ParserModule } from './modules/parser/parser.module';
+import { CoreModule } from './core/core.module';
+import { FilesModule } from './modules/db/files/files.module';
+import { TextChunksModule } from './modules/db/text-chunks/text-chunks.module';
 
 
 @Module({
-  imports: [UploadModule, DataSourceModule, ParserModule],
+  imports: [
+	ConfigModule.forRoot({
+		isGlobal: true,
+		envFilePath: [
+			'.env.local',
+			'.env',
+			'../.env.local',
+			'../.env',
+			'../../.env.local',
+			'../../.env'
+		],
+		cache: true,
+	}),
+	UploadModule,
+	DataSourceModule,
+	ParserModule,
+	CoreModule,
+	FilesModule,
+	TextChunksModule
+  ],
   controllers: [],
   providers: [],
 })
