@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { UploadModule } from './upload/upload.module';
-import { DataSourceModule } from './data-sources/data-source.module';
-import { ParserModule } from './parser/parser.module';
-import { SupabaseModule } from './supabase/supabase.module';
+import { UploadModule } from './modules/upload/upload.module';
+import { DataSourceModule } from './modules/data-sources/data-source.module';
+import { ParserModule } from './modules/parser/parser.module';
+import { CoreModule } from './core/core.module';
+import { FilesModule } from './modules/db/files/files.module';
+import { TextChunksModule } from './modules/db/text-chunks/text-chunks.module';
 
 
 @Module({
@@ -23,7 +25,9 @@ import { SupabaseModule } from './supabase/supabase.module';
 	UploadModule,
 	DataSourceModule,
 	ParserModule,
-	SupabaseModule.forRootAsyncFromEnv()
+	CoreModule,
+	FilesModule,
+	TextChunksModule
   ],
   controllers: [],
   providers: [],
