@@ -3,6 +3,7 @@ import { FileUploadResult, UploadedFile } from './interfaces/upload-file.interfa
 import * as fs from 'fs';
 import * as path from 'path';
 
+
 @Injectable()
 export class UploadService {
   private readonly uploadDir = path.join(process.cwd(), 'uploads');
