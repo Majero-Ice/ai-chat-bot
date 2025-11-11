@@ -4,7 +4,7 @@ import { UploadService } from './upload.service';
 import { ParserModule } from '../parser/parser.module';
 import { FilesModule } from '../db/files/files.module';
 import { TextChunksModule } from '../db/text-chunks/text-chunks.module';
-import { EmbeddingsModule } from '../ai/embeddings.module';
+import { EmbeddingsModule } from '../ai/embeddings/embeddings.module';
 
 @Module({
   imports: [ParserModule, FilesModule, TextChunksModule, EmbeddingsModule],

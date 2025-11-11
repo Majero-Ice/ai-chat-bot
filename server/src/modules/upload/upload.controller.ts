@@ -14,7 +14,7 @@ import { ParserService } from '../parser/parser.service';
 import { memoryStorage } from 'multer';
 import { FilesService } from '../db/files/files.service';
 import { TextChunksService } from '../db/text-chunks/text-chunks.service';
-import { EmbeddingsService } from '../ai/embeddings.service';
+import { EmbeddingsService } from '../ai/embeddings/embeddings.service';
 
 @Controller('upload')
 export class UploadController {
@@ -82,7 +82,14 @@ export class UploadController {
         // Создаем эмбеддинги для всех чанков
         try {
           const texts = chunks.map((chunk) => chunk.text);
+          console.log(`[Upload] Creating embeddings for ${texts.length} chunks`);
           const embeddings = await this.embeddingsService.createEmbeddings(texts);
+          console.log(`[Upload] Created ${embeddings.length} embeddings`);
+          
+          if (embeddings.length > 0 && embeddings[0].length > 0) {
+            console.log(`[Upload] First embedding length: ${embeddings[0].length}`);
+            console.log(`[Upload] First embedding sample (first 5): ${embeddings[0].slice(0, 5).join(', ')}`);
+          }
           
           // Добавляем эмбеддинги к чанкам
           const chunksWithEmbeddings = chunks.map((chunk, index) => ({
@@ -90,10 +97,12 @@ export class UploadController {
             embedding: embeddings[index],
           }));
 
-          await this.textChunksService.insertMany(chunksWithEmbeddings);
+          const insertedCount = await this.textChunksService.insertMany(chunksWithEmbeddings);
+          console.log(`[Upload] Successfully inserted ${insertedCount} chunks with embeddings`);
         } catch (embeddingError) {
           // Если не удалось создать эмбеддинги, сохраняем чанки без эмбеддингов
-          console.error('Failed to create embeddings:', embeddingError);
+          console.error('[Upload] Failed to create embeddings:', embeddingError);
+          console.error('[Upload] Error details:', embeddingError instanceof Error ? embeddingError.message : String(embeddingError));
           await this.textChunksService.insertMany(chunks);
         }
       }

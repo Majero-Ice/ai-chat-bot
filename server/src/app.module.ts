@@ -6,7 +6,8 @@ import { ParserModule } from './modules/parser/parser.module';
 import { CoreModule } from './core/core.module';
 import { FilesModule } from './modules/db/files/files.module';
 import { TextChunksModule } from './modules/db/text-chunks/text-chunks.module';
-import { EmbeddingsModule } from './modules/ai/embeddings.module';
+import { EmbeddingsModule } from './modules/ai/embeddings/embeddings.module';
+import { ChatModule } from './modules/ai/chat/chat.module';
 
 
 @Module({
@@ -29,7 +30,8 @@ import { EmbeddingsModule } from './modules/ai/embeddings.module';
 	CoreModule,
 	FilesModule,
 	TextChunksModule,
-	EmbeddingsModule
+	EmbeddingsModule,
+	ChatModule
   ],
   controllers: [],
   providers: [],
