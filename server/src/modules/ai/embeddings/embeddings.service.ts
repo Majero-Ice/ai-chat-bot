@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { AI_PROVIDER } from '../../core/ai/ai.constants';
-import type { EmbeddingsProvider } from '../../core/ai/interfaces/ai-provider.interface';
+import { AI_PROVIDER } from '../../../core/ai/ai.constants';
+import type { EmbeddingsProvider } from '../../../core/ai/interfaces/ai-provider.interface';
 
 /**
  * Сервис для создания векторных эмбеддингов
@@ -43,4 +43,3 @@ export class EmbeddingsService {
 		return embeddings[0];
 	}
 }
-
