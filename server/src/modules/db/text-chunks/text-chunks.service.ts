@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { TextChunkEntity } from './domain/text-chunk.entity';
 import type { TextChunksRepositoryPort } from './repositories/text-chunks.repository.port';
 import { SimilaritySearchResult } from './domain/similarity-search-result.interface';
@@ -47,8 +47,8 @@ export class TextChunksService {
 		embedding: number[],
 		options: FindSimilarChunksOptions = {},
 	): Promise<SimilaritySearchResult[]> {
-		const { limit = 5, threshold = 0.5 } = options;
-
+		// Снижаем порог по умолчанию до 0.3 для более гибкого поиска
+		const { limit = 5, threshold = 0.3 } = options;
 		if (!embedding || embedding.length === 0) {
 			throw new Error('Embedding vector cannot be empty');
 		}
@@ -66,7 +66,8 @@ export class TextChunksService {
 		embedding: number[],
 		options: FindSimilarChunksOptions = {},
 	): Promise<SimilaritySearchResult[]> {
-		const { limit = 5, threshold = 0.5 } = options;
+		// Снижаем порог по умолчанию до 0.3 для более гибкого поиска
+		const { limit = 5, threshold = 0.3 } = options;
 
 		if (!embedding || embedding.length === 0) {
 			throw new Error('Embedding vector cannot be empty');

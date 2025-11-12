@@ -6,8 +6,11 @@ import {
   BadRequestException,
   HttpCode,
   HttpStatus,
+  Req,
+  Res,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Request, Response } from 'express';
 import { UploadService } from './upload.service';
 import { FileUploadResult } from './interfaces/upload-file.interface';
 import { ParserService } from '../parser/parser.service';
@@ -15,6 +18,8 @@ import { memoryStorage } from 'multer';
 import { FilesService } from '../db/files/files.service';
 import { TextChunksService } from '../db/text-chunks/text-chunks.service';
 import { EmbeddingsService } from '../ai/embeddings/embeddings.service';
+import { decodeFilename, decodeFilenameFromHeader } from './utils/decode-filename.util';
+import { decodeFileContent } from './utils/decode-file-content.util';
 
 @Controller('upload')
 export class UploadController {
@@ -27,7 +32,6 @@ export class UploadController {
   ) {}
 
   @Post('file')
-  @HttpCode(HttpStatus.OK)
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -59,18 +63,44 @@ export class UploadController {
   )
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
-  ): Promise<FileUploadResult> {
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
     if (!file) {
       throw new BadRequestException('File is required');
     }
+
+    // Декодируем имя файла, которое multer уже извлек из Content-Disposition
+    // Multer может неправильно декодировать имя файла, особенно если оно содержит не-ASCII символы
+    let decodedFilename = file.originalname;
+    try {
+      // Пробуем декодировать имя файла
+      // Если имя файла выглядит как кракозябры (содержит неправильно закодированные символы),
+      // попробуем интерпретировать его как Latin-1 и конвертировать в UTF-8
+      decodedFilename = decodeFilename(file.originalname);
+      
+      // Логируем для отладки
+      if (decodedFilename !== file.originalname) {
+        console.log(`[Upload] Decoded filename: "${file.originalname}" -> "${decodedFilename}"`);
+      }
+    } catch (error) {
+      console.warn('Failed to decode filename, using original:', file.originalname, error);
+      // Используем оригинальное имя файла в случае ошибки
+    }
+
+    // Декодируем содержимое файла с автоматическим определением кодировки
+    // Поддерживает UTF-8, Windows-1251 и другие кодировки
+    const fileContent = decodeFileContent(file.buffer);
+
+    // Обновляем имя файла в объекте file
+    file.originalname = decodedFilename;
 
     const result = await this.uploadService.saveFile(file);
 
     // Парсим файл и создаем эмбеддинги
     try {
-      const fileEntity = await this.filesService.create(file.originalname);
+      const fileEntity = await this.filesService.create(decodedFilename);
       
-      const fileContent = file.buffer.toString('utf-8');
       const parseResult = await this.parserService.parse('file', fileContent);
       if (parseResult.chunks && parseResult.chunks.length > 0) {
         const chunks = parseResult.chunks.map((chunk) => ({
@@ -111,7 +141,9 @@ export class UploadController {
       console.error('Failed to parse file:', error);
     }
 
-    return result;
+    // Устанавливаем правильные заголовки с кодировкой UTF-8
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.status(HttpStatus.OK).json(result);
   }
 
 

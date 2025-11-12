@@ -40,8 +40,10 @@ export class ChatService {
 
 		const options: ChatOptions = {
 			maxContextChunks: request.maxContextChunks ?? 5,
-			// Снижаем порог по умолчанию до 0.5 для более гибкого поиска
-			similarityThreshold: request.similarityThreshold ?? 0.5,
+			// Снижаем порог по умолчанию до 0.3 для более гибкого поиска
+			// Cosine similarity для эмбеддингов обычно дает значения от 0.7 до 1.0 для похожих текстов
+			// Порог 0.3 позволяет находить более широкий спектр релевантных результатов
+			similarityThreshold: request.similarityThreshold ?? 0.3,
 			model: 'gpt-4o-mini',
 		};
 
@@ -90,25 +92,55 @@ export class ChatService {
 		try {
 			if (fileId) {
 				// Поиск в конкретном файле
-				console.log(`Searching in file: ${fileId} with query: "${query.substring(0, 50)}..."`);
+				console.log(`[Chat] Searching in file: ${fileId} with query: "${query.substring(0, 50)}..."`);
+				console.log(`[Chat] Search options: limit=${options.maxContextChunks}, threshold=${options.similarityThreshold}`);
 				const results = await this.semanticSearchService.searchByText(fileId, query, {
 					limit: options.maxContextChunks,
 					threshold: options.similarityThreshold,
 				});
-				console.log(`Found ${results.length} relevant chunks in file ${fileId}`);
+				console.log(`[Chat] Found ${results.length} relevant chunks in file ${fileId}`);
+				if (results.length > 0) {
+					console.log(`[Chat] Top similarity: ${results[0].similarity.toFixed(4)}`);
+				}
 				return results;
 			}
 
 			// Поиск по всем файлам
-			console.log(`Searching across all files with query: "${query.substring(0, 50)}..."`);
+			console.log(`[Chat] Searching across all files with query: "${query.substring(0, 50)}..."`);
+			console.log(`[Chat] Search options: limit=${options.maxContextChunks}, threshold=${options.similarityThreshold}`);
 			const results = await this.semanticSearchService.searchByTextAllFiles(query, {
 				limit: options.maxContextChunks,
 				threshold: options.similarityThreshold,
 			});
-			console.log(`Found ${results.length} relevant chunks across all files`);
+			console.log(`[Chat] Found ${results.length} relevant chunks across all files`);
+			if (results.length > 0) {
+				console.log(`[Chat] Top similarity: ${results[0].similarity.toFixed(4)}`);
+				console.log(`[Chat] Top chunk preview: "${results[0].chunk.text.substring(0, 100)}..."`);
+			} else {
+				const currentThreshold = options.similarityThreshold ?? 0.3;
+				const currentLimit = options.maxContextChunks ?? 5;
+				console.warn(`[Chat] No chunks found above threshold ${currentThreshold}`);
+				// Если ничего не найдено, пробуем с еще более низким порогом
+				if (currentThreshold > 0.1) {
+					console.log(`[Chat] Trying with lower threshold: 0.1`);
+					const lowerThresholdResults = await this.semanticSearchService.searchByTextAllFiles(query, {
+						limit: currentLimit * 2, // Увеличиваем лимит для более широкого поиска
+						threshold: 0.1,
+					});
+					if (lowerThresholdResults.length > 0) {
+						console.log(`[Chat] Found ${lowerThresholdResults.length} chunks with lower threshold (0.1)`);
+						// Возвращаем топ результаты, отфильтрованные по более высокому порогу
+						return lowerThresholdResults.slice(0, currentLimit);
+					}
+				}
+			}
 			return results;
 		} catch (error) {
-			console.error('Error finding relevant context:', error);
+			console.error('[Chat] Error finding relevant context:', error);
+			if (error instanceof Error) {
+				console.error('[Chat] Error message:', error.message);
+				console.error('[Chat] Error stack:', error.stack);
+			}
 			// В случае ошибки возвращаем пустой массив, чтобы чат мог работать без контекста
 			return [];
 		}
