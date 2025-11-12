@@ -48,9 +48,10 @@ export class SupabaseTextChunksRepository extends BaseRepository<TextChunkEntity
 		fileId: string,
 		embedding: number[],
 		limit: number = 5,
-		threshold: number = 0.5,
+		threshold: number = 0.3,
 	): Promise<SimilaritySearchResult[]> {
-		console.log(`[RPC] Attempting RPC call for file ${fileId}`);
+		console.log(`[RPC] Attempting RPC call for file ${fileId} with threshold ${threshold}`);
+		console.log(`[RPC] Query embedding length: ${embedding.length}, first 5 values: ${embedding.slice(0, 5).join(', ')}`);
 		
 		// Используем RPC функцию для векторного поиска в Supabase с pgvector
 		// Предполагается, что в БД есть функция match_chunks или используется встроенный поиск
@@ -63,12 +64,16 @@ export class SupabaseTextChunksRepository extends BaseRepository<TextChunkEntity
 
 		if (error) {
 			console.warn(`[RPC] RPC function error, using fallback:`, error.message);
+			console.warn(`[RPC] Error details:`, error);
 			// Если RPC функция не существует, используем альтернативный подход
 			// через вычисление cosine similarity в запросе
 			return this.findSimilarByEmbeddingFallback(fileId, embedding, limit, threshold);
 		}
 
 		console.log(`[RPC] RPC function returned ${data?.length || 0} results`);
+		if (data && data.length > 0) {
+			console.log(`[RPC] Top result similarity: ${data[0]?.similarity || 'unknown'}`);
+		}
 		
 		// Преобразуем результат RPC в формат SimilaritySearchResult
 		return (data || []).map((item: any) => ({
@@ -194,9 +199,10 @@ export class SupabaseTextChunksRepository extends BaseRepository<TextChunkEntity
 	async findSimilarByEmbeddingAllFiles(
 		embedding: number[],
 		limit: number = 5,
-		threshold: number = 0.5,
+		threshold: number = 0.3,
 	): Promise<SimilaritySearchResult[]> {
-		console.log(`[RPC All Files] Attempting RPC call for all files`);
+		console.log(`[RPC All Files] Attempting RPC call for all files with threshold ${threshold}`);
+		console.log(`[RPC All Files] Query embedding length: ${embedding.length}, first 5 values: ${embedding.slice(0, 5).join(', ')}`);
 		
 		// Пытаемся использовать RPC функцию для поиска по всем файлам
 		const { data, error } = await this.client.rpc('match_text_chunks_all_files', {
@@ -207,11 +213,20 @@ export class SupabaseTextChunksRepository extends BaseRepository<TextChunkEntity
 
 		if (error) {
 			console.warn(`[RPC All Files] RPC function error, using fallback:`, error.message);
+			console.warn(`[RPC All Files] Error details:`, error);
 			// Если RPC функция не существует, используем альтернативный подход
 			return this.findSimilarByEmbeddingAllFilesFallback(embedding, limit, threshold);
 		}
 
 		console.log(`[RPC All Files] RPC function returned ${data?.length || 0} results`);
+		if (data && data.length > 0) {
+			console.log(`[RPC All Files] Top result similarity: ${data[0]?.similarity || 'unknown'}`);
+		} else if (data && data.length === 0) {
+			console.warn(`[RPC All Files] RPC function returned 0 results, trying fallback method`);
+			// Если RPC вернул 0 результатов, пробуем fallback метод
+			// Возможно, проблема в настройке RPC функции или пороге
+			return this.findSimilarByEmbeddingAllFilesFallback(embedding, limit, threshold);
+		}
 		
 		// Преобразуем результат RPC в формат SimilaritySearchResult
 		return (data || []).map((item: any) => ({
@@ -256,11 +271,15 @@ export class SupabaseTextChunksRepository extends BaseRepository<TextChunkEntity
 		}
 
 		// Вычисляем cosine similarity для каждого чанка
-		const results: SimilaritySearchResult[] = data
-			.map((chunk: any, index: number) => {
-				// Эмбеддинг может быть в разных форматах: массив, строка JSON, или векторный тип
-				let chunkEmbedding: number[];
-				
+		const similarities: Array<{ chunk: any; similarity: number }> = [];
+		
+		for (let index = 0; index < data.length; index++) {
+			const chunk: any = data[index];
+			
+			// Эмбеддинг может быть в разных форматах: массив, строка JSON, или векторный тип
+			let chunkEmbedding: number[];
+			
+			try {
 				if (Array.isArray(chunk.embedding)) {
 					chunkEmbedding = chunk.embedding;
 				} else if (typeof chunk.embedding === 'string') {
@@ -277,7 +296,7 @@ export class SupabaseTextChunksRepository extends BaseRepository<TextChunkEntity
 							if (index < 3) {
 								console.warn(`[Fallback All Files] Cannot parse embedding for chunk ${chunk.id}:`, e, e2);
 							}
-							return null;
+							continue;
 						}
 					}
 				} else if (chunk.embedding && typeof chunk.embedding === 'object' && 'toArray' in chunk.embedding) {
@@ -287,7 +306,7 @@ export class SupabaseTextChunksRepository extends BaseRepository<TextChunkEntity
 					if (index < 3) {
 						console.warn(`[Fallback All Files] Unknown embedding format for chunk ${chunk.id}:`, typeof chunk.embedding, chunk.embedding?.constructor?.name);
 					}
-					return null;
+					continue;
 				}
 
 				if (!chunkEmbedding || chunkEmbedding.length !== embedding.length) {
@@ -296,25 +315,33 @@ export class SupabaseTextChunksRepository extends BaseRepository<TextChunkEntity
 							`[Fallback All Files] Chunk ${chunk.id} embedding length mismatch: ${chunkEmbedding?.length} vs ${embedding.length}`,
 						);
 					}
-					return null;
+					continue;
 				}
 
 				const similarity = this.cosineSimilarity(embedding, chunkEmbedding);
 				
 				// Логируем топ результаты
-				if (index < 5) {
+				if (index < 10) {
 					console.log(`[Fallback All Files] Chunk ${chunk.id} (file: ${chunk.file_id}) similarity: ${similarity.toFixed(4)}`);
 				}
 				
-				return {
+				similarities.push({
 					chunk: chunk as TextChunkEntity,
 					similarity,
-				};
-			})
-			.filter((result): result is SimilaritySearchResult => {
-				if (result === null) return false;
+				});
+			} catch (error) {
+				if (index < 3) {
+					console.warn(`[Fallback All Files] Error processing chunk ${chunk.id}:`, error);
+				}
+				continue;
+			}
+		}
+		
+		// Сортируем по схожести и фильтруем по порогу
+		const results: SimilaritySearchResult[] = similarities
+			.filter((result) => {
 				const passes = result.similarity >= threshold;
-				if (!passes && result.similarity > 0.5) {
+				if (!passes && result.similarity > 0.2) {
 					console.log(
 						`[Fallback All Files] Chunk ${result.chunk.id} similarity ${result.similarity.toFixed(4)} below threshold ${threshold}`,
 					);
@@ -322,11 +349,21 @@ export class SupabaseTextChunksRepository extends BaseRepository<TextChunkEntity
 				return passes;
 			})
 			.sort((a, b) => b.similarity - a.similarity)
-			.slice(0, limit);
+			.slice(0, limit)
+			.map((result) => ({
+				chunk: result.chunk,
+				similarity: result.similarity,
+			}));
 
-		console.log(`[Fallback All Files] Returning ${results.length} results above threshold ${threshold}`);
+		console.log(`[Fallback All Files] Processed ${similarities.length} chunks, found ${results.length} results above threshold ${threshold}`);
+		if (similarities.length > 0) {
+			const topSimilarity = Math.max(...similarities.map(s => s.similarity));
+			console.log(`[Fallback All Files] Top similarity among all chunks: ${topSimilarity.toFixed(4)}`);
+		}
 		if (results.length > 0) {
-			console.log(`[Fallback All Files] Top similarity: ${results[0].similarity.toFixed(4)}`);
+			console.log(`[Fallback All Files] Returning ${results.length} results, top similarity: ${results[0].similarity.toFixed(4)}`);
+		} else if (similarities.length > 0) {
+			console.warn(`[Fallback All Files] No results above threshold ${threshold}, but found chunks with similarities up to ${Math.max(...similarities.map(s => s.similarity)).toFixed(4)}`);
 		}
 		return results;
 	}
