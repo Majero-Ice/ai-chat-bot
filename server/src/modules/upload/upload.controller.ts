@@ -4,6 +4,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  Body,
   HttpCode,
   HttpStatus,
   Req,
@@ -13,24 +14,81 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { UploadService } from './upload.service';
 import { FileUploadResult } from './interfaces/upload-file.interface';
-import { ParserService } from '../parser/parser.service';
 import { memoryStorage } from 'multer';
-import { FilesService } from '../db/files/files.service';
-import { TextChunksService } from '../db/text-chunks/text-chunks.service';
-import { EmbeddingsService } from '../ai/embeddings/embeddings.service';
-import { decodeFilename, decodeFilenameFromHeader } from './utils/decode-filename.util';
+import { decodeFilename } from './utils/decode-filename.util';
 import { decodeFileContent } from './utils/decode-file-content.util';
+import { DataSourcesService } from '../data-sources/data-source.service';
+import { ContentProcessingService } from './services/content-processing.service';
+import { ContentSourceType, ParserType } from './dto/upload-content.dto';
+import type { UploadContentDto } from './dto/upload-content.dto';
 
 @Controller('upload')
 export class UploadController {
   constructor(
     private readonly uploadService: UploadService,
-    private readonly parserService: ParserService,
-    private readonly textChunksService: TextChunksService,
-    private readonly filesService: FilesService,
-    private readonly embeddingsService: EmbeddingsService,
+    private readonly dataSourcesService: DataSourcesService,
+    private readonly contentProcessingService: ContentProcessingService,
   ) {}
 
+  /**
+   * Универсальный эндпоинт для загрузки контента из разных источников
+   * Поддерживает: файлы, краулер
+   */
+  @Post('content')
+  @HttpCode(HttpStatus.OK)
+  async uploadContent(@Body() dto: UploadContentDto) {
+    const {
+      sourceType,
+      source,
+      fileName,
+      parserType,
+      crawlerOptions,
+      skipEmbeddings = false,
+    } = dto;
+
+    // Определяем имя файла
+    const finalFileName = fileName || this.getFileNameFromSource(source, sourceType);
+
+    // Определяем тип парсера
+    const finalParserType = parserType || this.getParserTypeFromSourceType(sourceType);
+
+    // Получаем данные из источника
+    let content: string;
+    try {
+      if (sourceType === ContentSourceType.CRAWLER) {
+        content = await this.dataSourcesService.getData('crawler', source, crawlerOptions);
+      } else {
+        content = await this.dataSourcesService.getData(sourceType, source);
+      }
+    } catch (error) {
+      throw new BadRequestException(
+        `Failed to get data from source: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    // Обрабатываем контент
+    const result = await this.contentProcessingService.processContent(content, {
+      fileName: finalFileName,
+      parserType: finalParserType,
+      skipEmbeddings,
+      sourceType,
+      sourceUrl: sourceType === ContentSourceType.CRAWLER ? source : undefined,
+    });
+
+    return {
+      success: true,
+      fileId: result.fileId,
+      siteId: result.siteId,
+      chunksCount: result.chunksCount,
+      embeddingsCount: result.embeddingsCount,
+      pagesCount: result.pagesCount,
+    };
+  }
+
+  /**
+   * Эндпоинт для загрузки файла (обратная совместимость)
+   * Использует новый ContentProcessingService
+   */
   @Post('file')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -70,84 +128,77 @@ export class UploadController {
       throw new BadRequestException('File is required');
     }
 
-    // Декодируем имя файла, которое multer уже извлек из Content-Disposition
-    // Multer может неправильно декодировать имя файла, особенно если оно содержит не-ASCII символы
+    // Декодируем имя файла
     let decodedFilename = file.originalname;
     try {
-      // Пробуем декодировать имя файла
-      // Если имя файла выглядит как кракозябры (содержит неправильно закодированные символы),
-      // попробуем интерпретировать его как Latin-1 и конвертировать в UTF-8
       decodedFilename = decodeFilename(file.originalname);
-      
-      // Логируем для отладки
       if (decodedFilename !== file.originalname) {
         console.log(`[Upload] Decoded filename: "${file.originalname}" -> "${decodedFilename}"`);
       }
     } catch (error) {
       console.warn('Failed to decode filename, using original:', file.originalname, error);
-      // Используем оригинальное имя файла в случае ошибки
     }
 
-    // Декодируем содержимое файла с автоматическим определением кодировки
-    // Поддерживает UTF-8, Windows-1251 и другие кодировки
+    // Декодируем содержимое файла
     const fileContent = decodeFileContent(file.buffer);
 
-    // Обновляем имя файла в объекте file
-    file.originalname = decodedFilename;
+    // Сохраняем файл
+    const uploadResult = await this.uploadService.saveFile(file);
 
-    const result = await this.uploadService.saveFile(file);
-
-    // Парсим файл и создаем эмбеддинги
+    // Обрабатываем контент через новый сервис
     try {
-      const fileEntity = await this.filesService.create(decodedFilename);
-      
-      const parseResult = await this.parserService.parse('file', fileContent);
-      if (parseResult.chunks && parseResult.chunks.length > 0) {
-        const chunks = parseResult.chunks.map((chunk) => ({
-          file_id: fileEntity.id,
-          chunk_index: chunk.index,
-          text: chunk.content,
-        }));
+      const processResult = await this.contentProcessingService.processContent(fileContent, {
+        fileName: decodedFilename,
+        parserType: 'file',
+        skipEmbeddings: false,
+      });
 
-        // Создаем эмбеддинги для всех чанков
-        try {
-          const texts = chunks.map((chunk) => chunk.text);
-          console.log(`[Upload] Creating embeddings for ${texts.length} chunks`);
-          const embeddings = await this.embeddingsService.createEmbeddings(texts);
-          console.log(`[Upload] Created ${embeddings.length} embeddings`);
-          
-          if (embeddings.length > 0 && embeddings[0].length > 0) {
-            console.log(`[Upload] First embedding length: ${embeddings[0].length}`);
-            console.log(`[Upload] First embedding sample (first 5): ${embeddings[0].slice(0, 5).join(', ')}`);
-          }
-          
-          // Добавляем эмбеддинги к чанкам
-          const chunksWithEmbeddings = chunks.map((chunk, index) => ({
-            ...chunk,
-            embedding: embeddings[index],
-          }));
-
-          const insertedCount = await this.textChunksService.insertMany(chunksWithEmbeddings);
-          console.log(`[Upload] Successfully inserted ${insertedCount} chunks with embeddings`);
-        } catch (embeddingError) {
-          // Если не удалось создать эмбеддинги, сохраняем чанки без эмбеддингов
-          console.error('[Upload] Failed to create embeddings:', embeddingError);
-          console.error('[Upload] Error details:', embeddingError instanceof Error ? embeddingError.message : String(embeddingError));
-          await this.textChunksService.insertMany(chunks);
-        }
-      }
+      // Устанавливаем правильные заголовки с кодировкой UTF-8
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(HttpStatus.OK).json({
+        ...uploadResult,
+        processing: {
+          fileId: processResult.fileId,
+          chunksCount: processResult.chunksCount,
+          embeddingsCount: processResult.embeddingsCount,
+        },
+      });
     } catch (error) {
-      // Ошибка парсинга не прерывает загрузку файла
-      console.error('Failed to parse file:', error);
+      // Ошибка обработки не прерывает загрузку файла
+      console.error('Failed to process file:', error);
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(HttpStatus.OK).json(uploadResult);
     }
-
-    // Устанавливаем правильные заголовки с кодировкой UTF-8
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.status(HttpStatus.OK).json(result);
   }
 
+  /**
+   * Определяет имя файла из источника
+   */
+  private getFileNameFromSource(source: string, sourceType: ContentSourceType): string {
+    if (sourceType === ContentSourceType.FILE) {
+      return source.split(/[/\\]/).pop() || 'file';
+    }
+    if (sourceType === ContentSourceType.CRAWLER) {
+      try {
+        const url = new URL(source);
+        return url.hostname + url.pathname.replace(/[^a-zA-Z0-9]/g, '_') || 'web-content';
+      } catch {
+        return 'web-content';
+      }
+    }
+    return 'untitled';
+  }
 
+  /**
+   * Определяет тип парсера из типа источника
+   */
+  private getParserTypeFromSourceType(sourceType: ContentSourceType): ParserType {
+    switch (sourceType) {
+      case ContentSourceType.CRAWLER:
+        return ParserType.CRAWLER;
+      case ContentSourceType.FILE:
+      default:
+        return ParserType.FILE;
+    }
+  }
 }
-
-
-

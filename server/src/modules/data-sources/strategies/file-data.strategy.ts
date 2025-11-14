@@ -6,7 +6,7 @@ import { UploadService } from '../../upload/upload.service';
 export class FileDataStrategy implements DataSourceStrategy {
   constructor(private readonly uploadService: UploadService) {}
 
-  async getData(source: string): Promise<string> {
+  async getData(source: string, options?: any): Promise<string> {
     try {
       let filePath: string;
       if (source.includes('/') || source.includes('\\')) {

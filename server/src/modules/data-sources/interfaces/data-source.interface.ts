@@ -1,5 +1,5 @@
 export interface DataSourceStrategy {
-  getData(source: string): Promise<any>;
+  getData(source: string, options?: any): Promise<string>;
 }
 
 
