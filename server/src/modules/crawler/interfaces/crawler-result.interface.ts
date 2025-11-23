@@ -3,6 +3,7 @@ export interface CrawledPage {
   title: string;
   content: string;
   timestamp: Date;
+  htmlFilePath?: string; // Путь к сохраненному HTML файлу
 }
 
 export interface CrawlerResult {

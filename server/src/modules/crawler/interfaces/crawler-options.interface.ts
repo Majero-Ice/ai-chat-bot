@@ -31,5 +31,9 @@ export interface CrawlerOptions {
    * Паттерны URL для включения (если указано, будут обрабатываться только эти паттерны)
    */
   includePatterns?: string[];
+  /**
+   * Сохранять ли HTML файлы на сервере (по умолчанию true)
+   */
+  saveHtml?: boolean;
 }
 
