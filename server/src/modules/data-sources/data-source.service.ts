@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { DataSourceStrategy } from "./interfaces/data-source.interface";
 import { FileDataStrategy } from "./strategies/file-data.strategy";
-import { HttpDataStrategy } from "./strategies/http-data.strategy";
+import { CrawlerDataStrategy } from "./strategies/crawler-data.strategy";
 
 @Injectable()
 export class DataSourcesService {
@@ -9,20 +9,20 @@ export class DataSourcesService {
 
   constructor(
     private fileStrategy: FileDataStrategy,
-    private httpStrategy: HttpDataStrategy,
+    private crawlerStrategy: CrawlerDataStrategy,
   ) {
     this.strategies = {
       file: this.fileStrategy,
-      http: this.httpStrategy,
+      crawler: this.crawlerStrategy,
     };
   }
 
-  async getData(type: 'file' | 'http', source: string) {
+  async getData(type: 'file' | 'crawler', source: string, options?: any): Promise<string> {
     const strategy = this.strategies[type];
     if (!strategy) {
       throw new Error(`Unknown data source type: ${type}`);
     }
-    return strategy.getData(source);
+    return strategy.getData(source, options);
   }
 }
 
