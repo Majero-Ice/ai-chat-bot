@@ -4,6 +4,7 @@ export const API_CONFIG = {
     chat: '/chat/message',
     uploadFile: '/upload/file',
     uploadContent: '/upload/content',
+    projects: '/projects',
   },
 } as const;
 

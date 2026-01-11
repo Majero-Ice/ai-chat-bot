@@ -8,6 +8,9 @@ import { FilesModule } from './modules/db/files/files.module';
 import { TextChunksModule } from './modules/db/text-chunks/text-chunks.module';
 import { EmbeddingsModule } from './modules/ai/embeddings/embeddings.module';
 import { ChatModule } from './modules/ai/chat/chat.module';
+import { UsersModule } from './modules/db/users/users.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { ProjectsModule } from './modules/projects/projects.module';
 
 
 @Module({
@@ -31,7 +34,10 @@ import { ChatModule } from './modules/ai/chat/chat.module';
 	FilesModule,
 	TextChunksModule,
 	EmbeddingsModule,
-	ChatModule
+	ChatModule,
+	UsersModule,
+	AuthModule,
+	ProjectsModule
   ],
   controllers: [],
   providers: [],

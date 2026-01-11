@@ -3,7 +3,6 @@ import { BrowserContext, Page } from 'playwright';
 import { CrawlerOptions } from './interfaces/crawler-options.interface';
 import { CrawlerResult, CrawledPage, CrawlerError } from './interfaces/crawler-result.interface';
 import { CrawlerService as CoreCrawlerService } from '../../core/crawler/crawler.service';
-import { AntiDetectService } from '../../core/crawler/anti-detect.service';
 import { HtmlStorageService } from './services/html-storage.service';
 import { URL } from 'url';
 
@@ -24,7 +23,6 @@ export class WebCrawlerService {
 
   constructor(
     @Inject(CoreCrawlerService) private readonly coreCrawlerService: CoreCrawlerService,
-    @Inject(AntiDetectService) private readonly antiDetectService: AntiDetectService,
     @Inject(HtmlStorageService) private readonly htmlStorageService: HtmlStorageService,
   ) {}
 
@@ -134,134 +132,26 @@ export class WebCrawlerService {
 
       page = await context.newPage();
       
-      // Применяем все техники анти-детекта к странице
-      await this.antiDetectService.applyAllProtections(page);
-      
-      // Эмулируем поведение пользователя перед загрузкой страницы
-      // Добавляем небольшую задержку для имитации человеческого поведения
-      await page.waitForTimeout(500 + Math.random() * 1000);
-      
-      // Пробуем загрузить страницу с разными стратегиями ожидания
-      // Начинаем с более мягких стратегий для сайтов с долгой загрузкой
-      let pageLoaded = false;
-      let lastError: Error | null = null;
-      const waitStrategies: Array<'load' | 'domcontentloaded' | 'networkidle'> = ['domcontentloaded', 'load', 'networkidle'];
-      
-      for (const waitStrategy of waitStrategies) {
-        try {
-          // Эмулируем движение мыши перед переходом
-          await page.mouse.move(100 + Math.random() * 100, 100 + Math.random() * 100);
-          await page.waitForTimeout(100 + Math.random() * 200);
-          
-          const response = await page.goto(normalizedUrl, {
-            waitUntil: waitStrategy,
-            timeout: options.timeout,
-          });
-          
-          // Проверяем, не произошел ли редирект на капчу
-          if (response) {
-            const finalUrl = response.url();
-            if (this.isCaptchaUrl(finalUrl)) {
-              this.logger.warn(`Redirected to captcha page: ${finalUrl}`);
-              errors.push({
-                url: normalizedUrl,
-                error: 'Redirected to captcha',
-                timestamp: new Date(),
-              });
-              return;
-            }
-          }
-          
-          pageLoaded = true;
-          this.logger.debug(`Page loaded using ${waitStrategy} strategy`);
-          break;
-        } catch (error) {
-          lastError = error instanceof Error ? error : new Error(String(error));
-          // Если не получилось с этой стратегией, пробуем следующую
-          if (waitStrategy !== waitStrategies[waitStrategies.length - 1]) {
-            this.logger.debug(`Failed to load with ${waitStrategy}, trying next strategy...`);
-            // Добавляем задержку перед следующей попыткой
-            await page.waitForTimeout(1000 + Math.random() * 1000);
-            continue;
-          }
-        }
-      }
-
-      // Если все стратегии не сработали, пробуем загрузить с минимальным ожиданием
-      if (!pageLoaded) {
-        try {
-          this.logger.debug('Trying to load page with minimal wait...');
-          await page.goto(normalizedUrl, {
-            waitUntil: 'domcontentloaded',
-            timeout: Math.min(options.timeout, 10000), // Уменьшаем таймаут для fallback
-          });
-          pageLoaded = true;
-          this.logger.debug('Page loaded with minimal wait (fallback)');
-        } catch (fallbackError) {
-          // Если и это не сработало, пробуем просто дождаться появления body
-          try {
-            this.logger.debug('Waiting for body element to appear...');
-            await page.goto(normalizedUrl, { timeout: 5000 });
-            await page.waitForSelector('body', { timeout: 5000 });
-            pageLoaded = true;
-            this.logger.debug('Page body appeared (last resort)');
-          } catch (finalError) {
-            throw lastError || finalError;
-          }
-        }
-      }
-
-      // Проверяем наличие капчи перед продолжением
-      const hasCaptcha = await this.detectCaptcha(page);
-      if (hasCaptcha) {
-        this.logger.warn(`Captcha detected on ${normalizedUrl}, skipping page`);
-        errors.push({
-          url: normalizedUrl,
-          error: 'Captcha detected',
-          timestamp: new Date(),
+      // Загружаем страницу
+      try {
+        await page.goto(normalizedUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: options.timeout,
         });
-        return;
+      } catch (error) {
+        // Если не получилось загрузить, пробуем с минимальным ожиданием
+        try {
+          await page.goto(normalizedUrl, {
+            waitUntil: 'load',
+            timeout: Math.min(options.timeout, 10000),
+          });
+        } catch (fallbackError) {
+          throw error instanceof Error ? error : new Error(String(error));
+        }
       }
 
-      // Эмулируем поведение пользователя: скроллинг и движение мыши
-      await this.emulateHumanBehavior(page);
-      
       // Ждем загрузки контента (для JavaScript-приложений)
       await page.waitForTimeout(options.waitForContent);
-      
-      // Дополнительно ждем появления ссылок (для SPA и динамических сайтов)
-      // Пробуем несколько раз, так как контент может загружаться постепенно
-      let linksFound = false;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          // Эмулируем скроллинг перед проверкой ссылок
-          await page.evaluate(() => {
-            window.scrollTo(0, Math.random() * 500);
-          });
-          await page.waitForTimeout(500 + Math.random() * 500);
-          
-          const linkCount = await page.evaluate(() => {
-            return document.querySelectorAll('a[href]').length;
-          });
-          
-          if (linkCount > 0) {
-            linksFound = true;
-            this.logger.debug(`Found ${linkCount} links after attempt ${attempt + 1}`);
-            break;
-          }
-          
-          // Ждем еще немного перед следующей попыткой
-          if (attempt < 2) {
-            await page.waitForTimeout(2000);
-          }
-        } catch (e) {
-          // Игнорируем ошибки
-        }
-      }
-      
-      if (!linksFound) {
-        this.logger.debug('No links found after waiting, trying to extract anyway');
-      }
 
       // Извлекаем контент
       const title = await page.title();
@@ -334,11 +224,6 @@ export class WebCrawlerService {
           this.logger.log(`[${depth + 1}/${options.maxDepth}] Following link: ${normalizedLink} (visited: ${visitedUrls.size})`);
           processedCount++;
           
-          // Добавляем случайную задержку между запросами для имитации поведения человека
-          // Задержка от 2 до 5 секунд (увеличена для лучшего обхода защиты)
-          const delay = 2000 + Math.random() * 3000;
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          
           await this.crawlRecursive(
             context,
             normalizedLink,
@@ -378,154 +263,6 @@ export class WebCrawlerService {
     }
   }
 
-  /**
-   * Проверяет, является ли URL страницей с капчей
-   */
-  private isCaptchaUrl(url: string): boolean {
-    const urlLower = url.toLowerCase();
-    const captchaIndicators = [
-      'challenge',
-      'captcha',
-      'verify',
-      'recaptcha',
-      'hcaptcha',
-      'cloudflare',
-      'ddos',
-      'protection',
-      'checking',
-    ];
-    return captchaIndicators.some((indicator) => urlLower.includes(indicator));
-  }
-
-  /**
-   * Эмулирует поведение пользователя: скроллинг, движение мыши, паузы
-   */
-  private async emulateHumanBehavior(page: Page): Promise<void> {
-    try {
-      // Получаем размеры страницы
-      const viewport = await page.evaluate(() => {
-        return {
-          width: window.innerWidth,
-          height: window.innerHeight,
-          scrollHeight: document.documentElement.scrollHeight,
-        };
-      });
-
-      // Эмулируем скроллинг вниз с паузами
-      const scrollSteps = 3 + Math.floor(Math.random() * 3); // 3-5 шагов
-      const scrollDistance = viewport.scrollHeight / scrollSteps;
-
-      for (let i = 0; i < scrollSteps; i++) {
-        const scrollPosition = scrollDistance * (i + 1);
-        await page.evaluate((pos) => {
-          window.scrollTo({
-            top: pos,
-            behavior: 'smooth',
-          });
-        }, scrollPosition);
-
-        // Случайная пауза между скроллами
-        await page.waitForTimeout(300 + Math.random() * 700);
-
-        // Случайное движение мыши
-        const mouseX = 100 + Math.random() * (viewport.width - 200);
-        const mouseY = 100 + Math.random() * (viewport.height - 200);
-        await page.mouse.move(mouseX, mouseY, { steps: 5 + Math.floor(Math.random() * 10) });
-      }
-
-      // Возвращаемся наверх
-      await page.evaluate(() => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      });
-      await page.waitForTimeout(500 + Math.random() * 500);
-    } catch (error) {
-      // Игнорируем ошибки эмуляции
-      this.logger.debug(`Failed to emulate human behavior: ${error.message}`);
-    }
-  }
-
-  /**
-   * Обнаруживает наличие капчи на странице
-   */
-  private async detectCaptcha(page: Page): Promise<boolean> {
-    try {
-      // Проверяем наличие различных типов капчи
-      const captchaIndicators = await page.evaluate(() => {
-        // Проверяем наличие популярных капч по селекторам и тексту
-        const captchaSelectors = [
-          // reCAPTCHA
-          '.g-recaptcha',
-          '#recaptcha',
-          '[data-sitekey]',
-          'iframe[src*="recaptcha"]',
-          'iframe[src*="google.com/recaptcha"]',
-          // hCaptcha
-          '.h-captcha',
-          'iframe[src*="hcaptcha"]',
-          // Cloudflare
-          '.cf-browser-verification',
-          '#cf-wrapper',
-          '#challenge-form',
-          // Общие индикаторы
-          '[class*="captcha"]',
-          '[id*="captcha"]',
-          '[class*="challenge"]',
-          '[id*="challenge"]',
-        ];
-
-        // Проверяем селекторы
-        for (const selector of captchaSelectors) {
-          if (document.querySelector(selector)) {
-            return true;
-          }
-        }
-
-        // Проверяем текст на странице
-        const bodyText = document.body?.innerText?.toLowerCase() || '';
-        const captchaKeywords = [
-          'captcha',
-          'verify you are human',
-          'verify you\'re human',
-          'i\'m not a robot',
-          'challenge',
-          'cloudflare',
-          'checking your browser',
-          'please wait',
-          'ddos protection',
-        ];
-
-        for (const keyword of captchaKeywords) {
-          if (bodyText.includes(keyword)) {
-            // Проверяем, что это не просто упоминание в контенте
-            // Если ключевое слово встречается в заголовке или в большом количестве, вероятно это капча
-            const title = document.title?.toLowerCase() || '';
-            if (title.includes(keyword)) {
-              return true;
-            }
-            // Если ключевое слово встречается несколько раз, возможно это капча
-            const matches = (bodyText.match(new RegExp(keyword, 'g')) || []).length;
-            if (matches > 2) {
-              return true;
-            }
-          }
-        }
-
-        // Проверяем URL на наличие индикаторов капчи
-        const url = window.location.href.toLowerCase();
-        if (url.includes('challenge') || url.includes('captcha') || url.includes('verify')) {
-          return true;
-        }
-
-        return false;
-      });
-
-      return captchaIndicators;
-    } catch (error) {
-      // Если не удалось проверить, считаем что капчи нет (лучше попробовать, чем пропустить)
-      this.logger.debug(`Failed to detect captcha: ${error.message}`);
-      return false;
-    }
-  }
 
   /**
    * Извлекает HTML контент страницы
