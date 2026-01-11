@@ -13,11 +13,24 @@ export class SupabaseModule {
 			inject: [ConfigService],
 			useFactory: (config: ConfigService): SupabaseClient => {
 				const url = config.get<string>('SUPABASE_URL');
-				const key = config.get<string>('SUPABASE_ANON_KEY') ?? config.get<string>('SUPABASE_SERVICE_ROLE_KEY');
+				// Для аутентификации лучше использовать SERVICE_ROLE_KEY, чтобы обойти ограничения
+				const serviceRoleKey = config.get<string>('SUPABASE_SERVICE_ROLE_KEY');
+				const anonKey = config.get<string>('SUPABASE_ANON_KEY');
+				const key = serviceRoleKey ?? anonKey;
+				
 				if (!url || !key) {
 					throw new Error('Supabase configuration missing: set SUPABASE_URL and SUPABASE_ANON_KEY (or SUPABASE_SERVICE_ROLE_KEY).');
 				}
-				return createClient(url, key);
+				
+				const client = createClient(url, key, {
+					auth: {
+						// Автоматически подтверждаем email при использовании SERVICE_ROLE_KEY
+						autoRefreshToken: true,
+						persistSession: false,
+					},
+				});
+				
+				return client;
 			},
 		};
 

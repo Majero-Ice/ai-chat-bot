@@ -1,7 +1,6 @@
 import { DynamicModule, Global, Module } from '@nestjs/common';
 import { CRAWLER_BROWSER } from './crawler.constants';
 import { CrawlerService } from './crawler.service';
-import { AntiDetectService } from './anti-detect.service';
 import { chromium } from 'playwright';
 import type { Browser } from 'playwright';
 
@@ -40,8 +39,8 @@ export class CrawlerModule {
 
 		return {
 			module: CrawlerModule,
-			providers: [browserProvider, CrawlerService, AntiDetectService],
-			exports: [CRAWLER_BROWSER, CrawlerService, AntiDetectService],
+			providers: [browserProvider, CrawlerService],
+			exports: [CRAWLER_BROWSER, CrawlerService],
 		};
 	}
 }
